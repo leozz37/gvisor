@@ -33,9 +33,12 @@ import (
 type pathNode struct {
 	// opMu synchronizes high-level, sematic operations, such as the
 	// simultaneous creation and deletion of a file.
-	//
-	// opMu does not directly protect any fields in pathNode.
 	opMu sync.RWMutex
+
+	// deleted indicates that the backing file has been deleted. We stop many
+	// operations at the API level if they are incompatible with a file that has
+	// already been unlinked. deleted is protected by opMu.
+	deleted bool
 
 	// childMu protects the fields below.
 	childMu sync.RWMutex
@@ -211,7 +214,9 @@ func (p *pathNode) removeWithName(name string, fn func(ref *fidRef)) *pathNode {
 		for ref := range m {
 			delete(m, ref)
 			delete(p.childRefNames, ref)
-			fn(ref)
+			if fn != nil {
+				fn(ref)
+			}
 		}
 	}
 

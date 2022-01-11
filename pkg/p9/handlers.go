@@ -15,6 +15,7 @@
 package p9
 
 import (
+	errors2 "errors"
 	"fmt"
 	"io"
 	"os"
@@ -178,7 +179,7 @@ func (t *Tsetattrclunk) handle(cs *connState) message {
 		// This might be technically incorrect, as it's possible that
 		// there were multiple links and you can still change the
 		// corresponding inode information.
-		if !cs.server.options.SetAttrOnDeleted && ref.isDeleted() {
+		if !cs.server.options.SetAttrOnDeleted && ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 
@@ -222,7 +223,7 @@ func (t *Tremove) handle(cs *connState) message {
 		// See also rename below for reasoning.
 
 		// Is this file already deleted?
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 
@@ -346,7 +347,7 @@ func (t *Tlopen) handle(cs *connState) message {
 	)
 	if err := ref.safelyRead(func() (err error) {
 		// Has it been deleted already?
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 
@@ -401,7 +402,7 @@ func (t *Tlcreate) do(cs *connState, uid UID) (*Rlcreate, error) {
 	)
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow creation from non-directories or deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -472,7 +473,7 @@ func (t *Tsymlink) do(cs *connState, uid UID) (*Rsymlink, error) {
 	var qid QID
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow symlinks from non-directories or deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -511,7 +512,7 @@ func (t *Tlink) handle(cs *connState) message {
 
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow create links from non-directories or deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -553,7 +554,7 @@ func (t *Trenameat) handle(cs *connState) message {
 	// Perform the rename holding the global lock.
 	if err := ref.safelyGlobal(func() (err error) {
 		// Don't allow renaming across deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() || refTarget.isDeleted() || !refTarget.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() || refTarget.pathNode.deleted || !refTarget.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -596,7 +597,7 @@ func (t *Tunlinkat) handle(cs *connState) message {
 
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow deletion from non-directories or deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -659,13 +660,13 @@ func (t *Trename) handle(cs *connState) message {
 		}
 
 		// Don't allow renaming deleting entries, or target non-directories.
-		if ref.isDeleted() || refTarget.isDeleted() || !refTarget.mode.IsDir() {
+		if ref.pathNode.deleted || refTarget.pathNode.deleted || !refTarget.mode.IsDir() {
 			return unix.EINVAL
 		}
 
 		// If the parent is deleted, but we not, something is seriously wrong.
 		// It's fail to die at this point with an assertion failure.
-		if ref.parent.isDeleted() {
+		if ref.parent.pathNode.deleted {
 			panic(fmt.Sprintf("parent %+v deleted, child %+v is not", ref.parent, ref))
 		}
 
@@ -708,7 +709,7 @@ func (t *Treadlink) handle(cs *connState) message {
 		// Don't allow readlink on deleted files. There is no need to
 		// check if this file is opened because symlinks cannot be
 		// opened.
-		if ref.isDeleted() || !ref.mode.IsSymlink() {
+		if ref.pathNode.deleted || !ref.mode.IsSymlink() {
 			return unix.EINVAL
 		}
 
@@ -811,7 +812,7 @@ func (t *Tmknod) do(cs *connState, uid UID) (*Rmknod, error) {
 	var qid QID
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow mknod on deleted files.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -853,7 +854,7 @@ func (t *Tmkdir) do(cs *connState, uid UID) (*Rmkdir, error) {
 	var qid QID
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow mkdir on deleted files.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -913,7 +914,7 @@ func (t *Tsetattr) handle(cs *connState) message {
 		// This might be technically incorrect, as it's possible that
 		// there were multiple links and you can still change the
 		// corresponding inode information.
-		if !cs.server.options.SetAttrOnDeleted && ref.isDeleted() {
+		if !cs.server.options.SetAttrOnDeleted && ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 
@@ -946,7 +947,7 @@ func (t *Tallocate) handle(cs *connState) message {
 		}
 
 		// We don't allow allocate on files that have been deleted.
-		if !cs.server.options.AllocateOnDeleted && ref.isDeleted() {
+		if !cs.server.options.AllocateOnDeleted && ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 
@@ -993,7 +994,7 @@ func (t *Tgetxattr) handle(cs *connState) message {
 	var val string
 	if err := ref.safelyRead(func() (err error) {
 		// Don't allow getxattr on files that have been deleted.
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 		val, err = ref.file.GetXattr(t.Name, t.Size)
@@ -1014,7 +1015,7 @@ func (t *Tsetxattr) handle(cs *connState) message {
 
 	if err := ref.safelyWrite(func() error {
 		// Don't allow setxattr on files that have been deleted.
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 		return ref.file.SetXattr(t.Name, t.Value, t.Flags)
@@ -1035,7 +1036,7 @@ func (t *Tlistxattr) handle(cs *connState) message {
 	var xattrs map[string]struct{}
 	if err := ref.safelyRead(func() (err error) {
 		// Don't allow listxattr on files that have been deleted.
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 		xattrs, err = ref.file.ListXattr(t.Size)
@@ -1061,7 +1062,7 @@ func (t *Tremovexattr) handle(cs *connState) message {
 
 	if err := ref.safelyWrite(func() error {
 		// Don't allow removexattr on files that have been deleted.
-		if ref.isDeleted() {
+		if ref.pathNode.deleted {
 			return unix.EINVAL
 		}
 		return ref.file.RemoveXattr(t.Name)
@@ -1082,7 +1083,7 @@ func (t *Treaddir) handle(cs *connState) message {
 	var entries []Dirent
 	if err := ref.safelyRead(func() (err error) {
 		// Don't allow reading deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -1249,14 +1250,9 @@ func doWalk(cs *connState, ref *fidRef, names []string, getattr bool) (qids []QI
 				file:     sf,
 				mode:     ref.mode,
 				pathNode: ref.pathNode,
-
-				// For the clone case, the cloned fid must
-				// preserve the deleted property of the
-				// original FID.
-				deleted: ref.deleted,
 			}
 			if !ref.isRoot() {
-				if !newRef.isDeleted() {
+				if !newRef.pathNode.deleted {
 					// Add only if a non-root node; the same node.
 					ref.parent.pathNode.addChild(newRef, ref.parent.pathNode.nameFor(ref))
 				}
@@ -1418,7 +1414,7 @@ func (t *Tbind) handle(cs *connState) message {
 	)
 	if err := ref.safelyWrite(func() (err error) {
 		// Don't allow creation from non-directories or deleted directories.
-		if ref.isDeleted() || !ref.mode.IsDir() {
+		if ref.pathNode.deleted || !ref.mode.IsDir() {
 			return unix.EINVAL
 		}
 
@@ -1461,7 +1457,7 @@ func (t *Tlconnect) handle(cs *connState) message {
 	var osFile *fd.FD
 	if err := ref.safelyRead(func() (err error) {
 		// Don't allow connecting to deleted files.
-		if ref.isDeleted() || !ref.mode.IsSocket() {
+		if ref.pathNode.deleted || !ref.mode.IsSocket() {
 			return unix.EINVAL
 		}
 
@@ -1535,12 +1531,79 @@ func (t *Tmultigetattr) handle(cs *connState) message {
 	}
 	defer ref.DecRef()
 
-	var stats []FullStat
-	if err := ref.safelyRead(func() (err error) {
-		stats, err = ref.file.MultiGetAttr(t.Names)
-		return err
-	}); err != nil {
-		return newErr(err)
+	if cs.server.options.MultiGetAttrSupported {
+		var stats []FullStat
+		if err := ref.safelyRead(func() (err error) {
+			stats, err = ref.file.MultiGetAttr(t.Names)
+			return err
+		}); err != nil {
+			return newErr(err)
+		}
+		return &Rmultigetattr{Stats: stats}
 	}
+
+	stats := make([]FullStat, 0, len(t.Names))
+	mask := AttrMaskAll()
+	start := ref.file
+	startNode := ref.pathNode
+	parent := start
+	parentNode := startNode
+	closeParent := func() {
+		if parent != start {
+			_ = parent.Close()
+		}
+	}
+	defer closeParent()
+
+	cs.server.renameMu.RLock()
+	defer cs.server.renameMu.RUnlock()
+
+	for i, name := range t.Names {
+		if len(name) == 0 && i == 0 {
+			startNode.opMu.RLock()
+			qid, valid, attr, err := start.GetAttr(mask)
+			startNode.opMu.RUnlock()
+			if err != nil {
+				return newErr(err)
+			}
+			stats = append(stats, FullStat{
+				QID:   qid,
+				Valid: valid,
+				Attr:  attr,
+			})
+			continue
+		}
+
+		parentNode.opMu.RLock()
+		if parentNode.deleted {
+			parentNode.opMu.RUnlock()
+			break
+		}
+		qids, child, valid, attr, err := parent.WalkGetAttr([]string{name})
+		if err != nil {
+			parentNode.opMu.RUnlock()
+			if errors2.Is(err, unix.ENOENT) {
+				break
+			}
+			return newErr(err)
+		}
+		stats = append(stats, FullStat{
+			QID:   qids[0],
+			Valid: valid,
+			Attr:  attr,
+		})
+		// Update with next generation.
+		closeParent()
+		parent = child
+		childNode := parentNode.pathNodeFor(name)
+		parentNode.opMu.RUnlock()
+		parentNode = childNode
+		if attr.Mode.FileType() != ModeDirectory {
+			// Doesn't need to continue if entry is not a dir. Including symlinks
+			// that cannot be followed.
+			break
+		}
+	}
+
 	return &Rmultigetattr{Stats: stats}
 }

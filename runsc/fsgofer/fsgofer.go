@@ -150,8 +150,9 @@ func (a *attachPoint) Attach() (p9.File, error) {
 // a file that was created in the same path as the delete file.
 func (a *attachPoint) ServerOptions() p9.AttacherOptions {
 	return p9.AttacherOptions{
-		SetAttrOnDeleted:  true,
-		AllocateOnDeleted: true,
+		SetAttrOnDeleted:      true,
+		AllocateOnDeleted:     true,
+		MultiGetAttrSupported: true,
 	}
 }
 
@@ -411,7 +412,7 @@ func setOwnerIfNeeded(fd int, uid p9.UID, gid p9.GID) (unix.Stat_t, error) {
 	return stat, nil
 }
 
-// Open implements p9.File.
+// Open implements p9.File.Open.
 func (l *localFile) Open(flags p9.OpenFlags) (*fd.FD, p9.QID, uint32, error) {
 	if l.isOpen() {
 		panic(fmt.Sprintf("attempting to open already opened file: %q", l.hostPath))
@@ -458,7 +459,7 @@ func (l *localFile) Open(flags p9.OpenFlags) (*fd.FD, p9.QID, uint32, error) {
 	return fd, l.qid, 0, nil
 }
 
-// Create implements p9.File.
+// Create implements p9.File.Create.
 func (l *localFile) Create(name string, p9Flags p9.OpenFlags, perm p9.FileMode, uid p9.UID, gid p9.GID) (*fd.FD, p9.File, p9.QID, uint32, error) {
 	if err := l.checkROMount(); err != nil {
 		return nil, nil, p9.QID{}, 0, err
@@ -509,7 +510,7 @@ func (l *localFile) Create(name string, p9Flags p9.OpenFlags, perm p9.FileMode, 
 	return newFDMaybe(c.file), c, c.qid, 0, nil
 }
 
-// Mkdir implements p9.File.
+// Mkdir implements p9.File.Mkdir.
 func (l *localFile) Mkdir(name string, perm p9.FileMode, uid p9.UID, gid p9.GID) (p9.QID, error) {
 	if err := l.checkROMount(); err != nil {
 		return p9.QID{}, err
@@ -543,13 +544,13 @@ func (l *localFile) Mkdir(name string, perm p9.FileMode, uid p9.UID, gid p9.GID)
 	return l.attachPoint.makeQID(&stat), nil
 }
 
-// Walk implements p9.File.
+// Walk implements p9.File.Walk.
 func (l *localFile) Walk(names []string) ([]p9.QID, p9.File, error) {
 	qids, file, _, err := l.walk(names)
 	return qids, file, err
 }
 
-// WalkGetAttr implements p9.File.
+// WalkGetAttr implements p9.File.WalkGetAttr.
 func (l *localFile) WalkGetAttr(names []string) ([]p9.QID, p9.File, p9.AttrMask, p9.Attr, error) {
 	qids, file, stat, err := l.walk(names)
 	if err != nil {
@@ -615,7 +616,7 @@ func (l *localFile) walk(names []string) ([]p9.QID, p9.File, unix.Stat_t, error)
 	return qids, last, lastStat, nil
 }
 
-// StatFS implements p9.File.
+// StatFS implements p9.File.StatFS.
 func (l *localFile) StatFS() (p9.FSStat, error) {
 	var s unix.Statfs_t
 	if err := unix.Fstatfs(l.file.FD(), &s); err != nil {
@@ -635,7 +636,7 @@ func (l *localFile) StatFS() (p9.FSStat, error) {
 	}, nil
 }
 
-// FSync implements p9.File.
+// FSync implements p9.File.FSync.
 func (l *localFile) FSync() error {
 	if !l.isOpen() {
 		return unix.EBADF
@@ -646,7 +647,7 @@ func (l *localFile) FSync() error {
 	return nil
 }
 
-// GetAttr implements p9.File.
+// GetAttr implements p9.File.GetAttr.
 func (l *localFile) GetAttr(_ p9.AttrMask) (p9.QID, p9.AttrMask, p9.Attr, error) {
 	stat, err := fstat(l.file.FD())
 	if err != nil {
@@ -688,7 +689,7 @@ func (l *localFile) fillAttr(stat *unix.Stat_t) (p9.AttrMask, p9.Attr) {
 	return valid, attr
 }
 
-// SetAttr implements p9.File. Due to mismatch in file API, options
+// SetAttr implements p9.File.SetAttr. Due to mismatch in file API, options
 // cannot be changed atomically and user may see partial changes when
 // an error happens.
 func (l *localFile) SetAttr(valid p9.SetAttrMask, attr p9.SetAttr) error {
@@ -852,7 +853,7 @@ func (*localFile) RemoveXattr(string) error {
 	return unix.EOPNOTSUPP
 }
 
-// Allocate implements p9.File.
+// Allocate implements p9.File.Allocate.
 func (l *localFile) Allocate(mode p9.AllocateMode, offset, length uint64) error {
 	if !l.isOpen() {
 		return unix.EBADF
@@ -864,7 +865,7 @@ func (l *localFile) Allocate(mode p9.AllocateMode, offset, length uint64) error 
 	return nil
 }
 
-// Rename implements p9.File; this should never be called.
+// Rename implements p9.File.Rename; this should never be called.
 func (*localFile) Rename(p9.File, string) error {
 	panic("rename called directly")
 }
@@ -882,7 +883,7 @@ func (l *localFile) RenameAt(oldName string, directory p9.File, newName string) 
 	return nil
 }
 
-// ReadAt implements p9.File.
+// ReadAt implements p9.File.ReadAt.
 func (l *localFile) ReadAt(p []byte, offset uint64) (int, error) {
 	if l.mode != p9.ReadOnly && l.mode != p9.ReadWrite {
 		return 0, unix.EBADF
@@ -900,7 +901,7 @@ func (l *localFile) ReadAt(p []byte, offset uint64) (int, error) {
 	}
 }
 
-// WriteAt implements p9.File.
+// WriteAt implements p9.File.WriteAt.
 func (l *localFile) WriteAt(p []byte, offset uint64) (int, error) {
 	if l.mode != p9.WriteOnly && l.mode != p9.ReadWrite {
 		return 0, unix.EBADF
@@ -916,7 +917,7 @@ func (l *localFile) WriteAt(p []byte, offset uint64) (int, error) {
 	return w, nil
 }
 
-// Symlink implements p9.File.
+// Symlink implements p9.File.Symlink.
 func (l *localFile) Symlink(target, newName string, uid p9.UID, gid p9.GID) (p9.QID, error) {
 	if err := l.checkROMount(); err != nil {
 		return p9.QID{}, err
@@ -949,7 +950,7 @@ func (l *localFile) Symlink(target, newName string, uid p9.UID, gid p9.GID) (p9.
 	return l.attachPoint.makeQID(&stat), nil
 }
 
-// Link implements p9.File.
+// Link implements p9.File.Link.
 func (l *localFile) Link(target p9.File, newName string) error {
 	if err := l.checkROMount(); err != nil {
 		return err
@@ -962,7 +963,7 @@ func (l *localFile) Link(target p9.File, newName string) error {
 	return nil
 }
 
-// Mknod implements p9.File.
+// Mknod implements p9.File.Mknod.
 func (l *localFile) Mknod(name string, mode p9.FileMode, _ uint32, _ uint32, uid p9.UID, gid p9.GID) (p9.QID, error) {
 	if err := l.checkROMount(); err != nil {
 		return p9.QID{}, err
@@ -1003,7 +1004,7 @@ func (l *localFile) Mknod(name string, mode p9.FileMode, _ uint32, _ uint32, uid
 	return l.attachPoint.makeQID(&stat), nil
 }
 
-// UnlinkAt implements p9.File.
+// UnlinkAt implements p9.File.UnlinkAt.
 func (l *localFile) UnlinkAt(name string, flags uint32) error {
 	if err := l.checkROMount(); err != nil {
 		return err
@@ -1015,7 +1016,7 @@ func (l *localFile) UnlinkAt(name string, flags uint32) error {
 	return nil
 }
 
-// Readdir implements p9.File.
+// Readdir implements p9.File.Readdir.
 func (l *localFile) Readdir(offset uint64, count uint32) ([]p9.Dirent, error) {
 	if l.mode != p9.ReadOnly && l.mode != p9.ReadWrite {
 		return nil, unix.EBADF
@@ -1111,7 +1112,7 @@ func (l *localFile) readDirent(f int, offset uint64, count uint32, skip uint64) 
 	return dirents, nil
 }
 
-// Readlink implements p9.File.
+// Readlink implements p9.File.Readlink.
 func (l *localFile) Readlink() (string, error) {
 	// Shamelessly stolen from os.Readlink (added upper bound limit to buffer).
 	const limit = 1024 * 1024
@@ -1128,7 +1129,7 @@ func (l *localFile) Readlink() (string, error) {
 	return "", unix.ENOMEM
 }
 
-// Flush implements p9.File.
+// Flush implements p9.File.Flush.
 func (l *localFile) Flush() error {
 	return nil
 }
@@ -1207,7 +1208,7 @@ func (l *localFile) Bind(sockType uint32, sockName string, uid p9.UID, gid p9.GI
 	return &socketLocalFile{localFile: sockF.(*localFile), sock: sock}, qid[0], valid, attr, nil
 }
 
-// Connect implements p9.File.
+// Connect implements p9.File.Connect.
 func (l *localFile) Connect(flags p9.ConnectFlags) (*fd.FD, error) {
 	if !l.attachPoint.conf.HostUDS {
 		return nil, unix.ECONNREFUSED
@@ -1313,6 +1314,7 @@ func (l *localFile) checkROMount() error {
 	return nil
 }
 
+// MultiGetAttr implements p9.File.MultiGetAttr.
 func (l *localFile) MultiGetAttr(names []string) ([]p9.FullStat, error) {
 	stats := make([]p9.FullStat, 0, len(names))
 
@@ -1329,6 +1331,11 @@ func (l *localFile) MultiGetAttr(names []string) ([]p9.FullStat, error) {
 		names = names[1:]
 	}
 
+	// Note that while performing the walk below, we do not have read
+	// concurrency guarantee for any descendants. So files can be created/deleted
+	// while the walk is being performed. However, this should be fine from a
+	// security perspective as we are using host FDs to walk and checking that
+	// each opened path component is a directory.
 	parent := l.file.FD()
 	closeParent := func() {
 		if parent != l.file.FD() {
