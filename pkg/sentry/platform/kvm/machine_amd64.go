@@ -55,15 +55,23 @@ func (m *machine) initArchState() error {
 		recover()
 		debug.SetPanicOnFault(old)
 	}()
+
+	// Initialize all vCPUs to minimize kvm ioctl-s allowed by seccomp filters.
+	m.initialvCPUs = make(map[int]*vCPU)
+	m.mu.Lock()
+	for int(m.nextID) < m.maxVCPUs-1 {
+		c := m.newVCPU()
+		c.state = 0
+		m.initialvCPUs[c.id] = c
+	}
+	m.mu.Unlock()
+
 	c := m.Get()
 	defer m.Put(c)
 	bluepill(c)
 	ring0.SetCPUIDFaulting(true)
 
 	return nil
-}
-
-type machineArchState struct {
 }
 
 type vCPUArchState struct {
@@ -483,15 +491,6 @@ func (m *machine) getMaxVCPU() {
 	} else {
 		m.maxVCPUs = int(maxVCPUs)
 	}
-}
-
-// getNewVCPU create a new vCPU (maybe)
-func (m *machine) getNewVCPU() *vCPU {
-	if int(m.nextID) < m.maxVCPUs {
-		c := m.newVCPU()
-		return c
-	}
-	return nil
 }
 
 func archPhysicalRegions(physicalRegions []physicalRegion) []physicalRegion {

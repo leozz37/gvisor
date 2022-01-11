@@ -83,8 +83,8 @@ type machine struct {
 	// nextID is the next vCPU ID.
 	nextID uint32
 
-	// machineArchState is the architecture-specific state.
-	machineArchState
+	//initialvCPUs is the machine vCPUs which has initialized but not used
+	initialvCPUs map[int]*vCPU
 }
 
 const (
@@ -524,6 +524,17 @@ func (m *machine) dropPageTables(pt *pagetables.PageTables) {
 			c.PCIDs.Drop(pt)
 		}
 	}
+}
+
+// getNewVCPU() scan for an available vCPU from initialvCPUs
+func (m *machine) getNewVCPU() *vCPU {
+	for CID, c := range m.initialvCPUs {
+		if atomic.CompareAndSwapUint32(&c.state, vCPUReady, vCPUUser) {
+			delete(m.initialvCPUs, CID)
+			return c
+		}
+	}
+	return nil
 }
 
 // lock marks the vCPU as in user mode.
