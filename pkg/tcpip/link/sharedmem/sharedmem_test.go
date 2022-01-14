@@ -20,11 +20,14 @@ package sharedmem
 import (
 	"bytes"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
+	"gvisor.dev/gvisor/pkg/refs"
+	"gvisor.dev/gvisor/pkg/refsvfs2"
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -209,6 +212,8 @@ func TestSimpleSend(t *testing.T) {
 
 	// Prepare route.
 	var r stack.RouteInfo
+	var pkts stack.PacketBufferList
+	defer pkts.DecRef()
 	r.RemoteLinkAddress = remoteLinkAddr
 	r.LocalLinkAddress = localLinkAddr
 
@@ -233,7 +238,6 @@ func TestSimpleSend(t *testing.T) {
 			// See nic.writePacket.
 			pkt.EgressRoute = r
 			pkt.NetworkProtocolNumber = proto
-			var pkts stack.PacketBufferList
 			pkts.PushBack(pkt)
 			if _, err := c.ep.WritePackets(r, pkts, proto); err != nil {
 				t.Fatalf("WritePackets failed: %s", err)
@@ -310,6 +314,7 @@ func TestPreserveSrcAddressInSend(t *testing.T) {
 	pkt.NetworkProtocolNumber = proto
 
 	var pkts stack.PacketBufferList
+	defer pkts.DecRef()
 	pkts.PushBack(pkt)
 	if _, err := c.ep.WritePackets(r, pkts, proto); err != nil {
 		t.Fatalf("WritePackets failed: %s", err)
@@ -357,29 +362,31 @@ func TestFillTxQueue(t *testing.T) {
 	r.RemoteLinkAddress = remoteLinkAddr
 
 	buf := buffer.NewView(100)
-
-	// Each packet is uses no more than 40 bytes, so write that many packets
-	// until the tx queue if full.
-	ids := make(map[uint64]struct{})
-	for i := queuePipeSize / 40; i > 0; i-- {
-		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			ReserveHeaderBytes: int(c.ep.MaxHeaderLength()),
-			Data:               buf.ToVectorisedView(),
-		})
-
+	{
 		var pkts stack.PacketBufferList
-		pkts.PushBack(pkt)
-		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
-			t.Fatalf("WritePackets failed unexpectedly: %s", err)
-		}
+		// Each packet is uses no more than 40 bytes, so write that many packets
+		// until the tx queue if full.
+		ids := make(map[uint64]struct{})
+		for i := queuePipeSize / 40; i > 0; i-- {
+			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+				ReserveHeaderBytes: int(c.ep.MaxHeaderLength()),
+				Data:               buf.ToVectorisedView(),
+			})
 
-		// Check that they have different IDs.
-		desc := c.txq.tx.Pull()
-		pi := queue.DecodeTxPacketHeader(desc)
-		if _, ok := ids[pi.ID]; ok {
-			t.Fatalf("ID (%v) reused", pi.ID)
+			pkts.PushBack(pkt)
+			if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
+				t.Fatalf("WritePackets failed unexpectedly: %s", err)
+			}
+
+			// Check that they have different IDs.
+			desc := c.txq.tx.Pull()
+			pi := queue.DecodeTxPacketHeader(desc)
+			if _, ok := ids[pi.ID]; ok {
+				t.Fatalf("ID (%v) reused", pi.ID)
+			}
+			ids[pi.ID] = struct{}{}
 		}
-		ids[pi.ID] = struct{}{}
+		pkts.DecRef()
 	}
 
 	// Next attempt to write must fail.
@@ -393,6 +400,7 @@ func TestFillTxQueue(t *testing.T) {
 	if _, ok := err.(*tcpip.ErrWouldBlock); !ok {
 		t.Fatalf("got WritePackets(...) = %s, want %s", err, &tcpip.ErrWouldBlock{})
 	}
+	pkts.DecRef()
 }
 
 // TestFillTxQueueAfterBadCompletion sends a bad completion, then sends packets
@@ -424,6 +432,7 @@ func TestFillTxQueueAfterBadCompletion(t *testing.T) {
 		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
 			t.Fatalf("WritePackets failed unexpectedly: %s", err)
 		}
+		pkts.DecRef()
 	}
 
 	// Complete the two writes twice.
@@ -449,6 +458,7 @@ func TestFillTxQueueAfterBadCompletion(t *testing.T) {
 		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
 			t.Fatalf("WritePackets failed unexpectedly: %s", err)
 		}
+		pkts.DecRef()
 
 		// Check that they have different IDs.
 		desc := c.txq.tx.Pull()
@@ -470,6 +480,7 @@ func TestFillTxQueueAfterBadCompletion(t *testing.T) {
 	if _, ok := err.(*tcpip.ErrWouldBlock); !ok {
 		t.Fatalf("got WritePackets(...) = %s, want %s", err, &tcpip.ErrWouldBlock{})
 	}
+	pkts.DecRef()
 }
 
 // TestFillTxMemory sends packets until the we run out of shared memory.
@@ -497,6 +508,7 @@ func TestFillTxMemory(t *testing.T) {
 		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
 			t.Fatalf("WritePackets failed unexpectedly: %s", err)
 		}
+		pkts.DecRef()
 
 		// Check that they have different IDs.
 		desc := c.txq.tx.Pull()
@@ -519,6 +531,7 @@ func TestFillTxMemory(t *testing.T) {
 	if _, ok := err.(*tcpip.ErrWouldBlock); !ok {
 		t.Fatalf("got WritePackets(...) = %s, want %s", err, &tcpip.ErrWouldBlock{})
 	}
+	pkts.DecRef()
 }
 
 // TestFillTxMemoryWithMultiBuffer sends packets until the we run out of
@@ -547,6 +560,7 @@ func TestFillTxMemoryWithMultiBuffer(t *testing.T) {
 		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
 			t.Fatalf("WritePackets failed unexpectedly: %s", err)
 		}
+		pkts.DecRef()
 
 		// Pull the posted buffer.
 		c.txq.tx.Pull()
@@ -565,6 +579,7 @@ func TestFillTxMemoryWithMultiBuffer(t *testing.T) {
 		if _, ok := err.(*tcpip.ErrWouldBlock); !ok {
 			t.Fatalf("got WritePackets(...) = %s, want %s", err, &tcpip.ErrWouldBlock{})
 		}
+		pkts.DecRef()
 	}
 
 	// Attempt to write the one-buffer packet again. It must succeed.
@@ -578,6 +593,7 @@ func TestFillTxMemoryWithMultiBuffer(t *testing.T) {
 		if _, err := c.ep.WritePackets(r, pkts, header.IPv4ProtocolNumber); err != nil {
 			t.Fatalf("WritePackets failed unexpectedly: %s", err)
 		}
+		pkts.DecRef()
 	}
 }
 
@@ -793,4 +809,11 @@ func TestCloseWhileWaitingToPost(t *testing.T) {
 	c.cleanup()
 	cleaned = true
 	c.ep.Wait()
+}
+
+func TestMain(m *testing.M) {
+	refs.SetLeakMode(refs.LeaksPanic)
+	code := m.Run()
+	refsvfs2.DoLeakCheck()
+	os.Exit(code)
 }
