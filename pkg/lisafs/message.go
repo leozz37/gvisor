@@ -201,7 +201,7 @@ func (s *SizedString) MarshalBytes(dst []byte) []byte {
 func (s *SizedString) CheckedUnmarshal(src []byte) ([]byte, bool) {
 	var strLen primitive.Uint32
 	srcRemain, ok := strLen.CheckedUnmarshal(src)
-	if !ok || len(srcRemain) < int(strLen) {
+	if !ok || uint32(len(srcRemain)) < uint32(strLen) {
 		return src, false
 	}
 	// Take the hit, this leads to an allocation + memcpy. No way around it.
@@ -242,7 +242,7 @@ func (s *StringArray) CheckedUnmarshal(src []byte) ([]byte, bool) {
 		return src, false
 	}
 
-	if cap(*s) < int(arrLen) {
+	if uint32(cap(*s)) < uint32(arrLen) {
 		*s = make([]string, arrLen)
 	} else {
 		*s = (*s)[:arrLen]
@@ -468,10 +468,10 @@ func (w *WalkResp) CheckedUnmarshal(src []byte) ([]byte, bool) {
 
 	var numInodes primitive.Uint32
 	srcRemain = numInodes.UnmarshalUnsafe(srcRemain)
-	if int(numInodes)*(*Inode)(nil).SizeBytes() > len(srcRemain) {
+	if uint32(numInodes)*uint32((*Inode)(nil).SizeBytes()) > uint32(len(srcRemain)) {
 		return src, false
 	}
-	if cap(w.Inodes) < int(numInodes) {
+	if uint32(cap(w.Inodes)) < uint32(numInodes) {
 		w.Inodes = make([]Inode, numInodes)
 	} else {
 		w.Inodes = w.Inodes[:numInodes]
@@ -506,10 +506,10 @@ func (w *WalkStatResp) CheckedUnmarshal(src []byte) ([]byte, bool) {
 	var numStats primitive.Uint32
 	srcRemain := numStats.UnmarshalUnsafe(src)
 
-	if int(numStats)*linux.SizeOfStatx > len(srcRemain) {
+	if uint32(numStats)*uint32(linux.SizeOfStatx) > uint32(len(srcRemain)) {
 		return src, false
 	}
-	if cap(w.Stats) < int(numStats) {
+	if uint32(cap(w.Stats)) < uint32(numStats) {
 		w.Stats = make([]linux.Statx, numStats)
 	} else {
 		w.Stats = w.Stats[:numStats]
@@ -608,10 +608,10 @@ func (f *FdArray) CheckedUnmarshal(src []byte) ([]byte, bool) {
 	}
 	var arrLen primitive.Uint32
 	srcRemain := arrLen.UnmarshalUnsafe(src)
-	if int(arrLen)*(*FDID)(nil).SizeBytes() > len(srcRemain) {
+	if uint32(arrLen)*uint32((*FDID)(nil).SizeBytes()) > uint32(len(srcRemain)) {
 		return src, false
 	}
-	if cap(*f) < int(arrLen) {
+	if uint32(cap(*f)) < uint32(arrLen) {
 		*f = make(FdArray, arrLen)
 	} else {
 		*f = (*f)[:arrLen]
@@ -688,7 +688,7 @@ func (r *PReadResp) MarshalBytes(dst []byte) []byte {
 // CheckedUnmarshal implements marshal.CheckedMarshallable.CheckedUnmarshal.
 func (r *PReadResp) CheckedUnmarshal(src []byte) ([]byte, bool) {
 	srcRemain, ok := r.NumBytes.CheckedUnmarshal(src)
-	if !ok || int(r.NumBytes) > len(srcRemain) || int(r.NumBytes) > len(r.Buf) {
+	if !ok || uint32(r.NumBytes) > uint32(len(srcRemain)) || uint32(r.NumBytes) > uint32(len(r.Buf)) {
 		return src, false
 	}
 
@@ -730,7 +730,7 @@ func (w *PWriteReq) CheckedUnmarshal(src []byte) ([]byte, bool) {
 
 	// This is an optimization. Assuming that the server is making this call, it
 	// is safe to just point to src rather than allocating and copying.
-	if int(w.NumBytes) > len(srcRemain) {
+	if uint32(w.NumBytes) > uint32(len(srcRemain)) {
 		return src, false
 	}
 	w.Buf = srcRemain[:w.NumBytes]
@@ -1144,7 +1144,7 @@ func (g *Getdents64Resp) CheckedUnmarshal(src []byte) ([]byte, bool) {
 	}
 	var numDirents primitive.Uint32
 	srcRemain := numDirents.UnmarshalUnsafe(src)
-	if cap(g.Dirents) < int(numDirents) {
+	if uint32(cap(g.Dirents)) < uint32(numDirents) {
 		g.Dirents = make([]Dirent64, numDirents)
 	} else {
 		g.Dirents = g.Dirents[:numDirents]
